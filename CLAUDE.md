@@ -35,7 +35,9 @@ The Docker build uses `uv sync --frozen`, so a stale `uv.lock` breaks it.
   (each IVR call runs in its own gevent greenlet). `Model.query` is available via `Session.query_property()`.
   Tables: `big_table_input` (contacts + call results) and `big_table_output` (IVR results).
 - Concurrency is gevent/greenswitch, not asyncio (except the FastAPI app).
-- `dialer.py` call flow: `start()` selects rows where `job_uuid IS NULL` → `FSInboundConnection.originate()` →
+- `dialer.py` call flow: `start()` selects rows where `job_uuid IS NULL AND job_status IS NULL` →
+  `FSInboundConnection.originate()` (raises `OriginateError` on any reply other than `+OK Job-UUID: <uuid>`;
+  the dialer then stores `ORIGINATE_ERROR <reason>` on `job_status` and skips the row) →
   `on_job_finished` (BACKGROUND_JOB) stores `job_status` → `on_channel_hangup` stores hangup cause/SIP status.
   The IVR finds the contact through the `data_id` channel variable set on originate.
 - The spoken message lives in `TTSVoiceMessage.safe_run()`; company name and contact phone come from

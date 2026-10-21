@@ -6,7 +6,7 @@ import gevent
 # import greenswitch
 import sys
 from settings import config
-from freeswitch import FSInboundConnection
+from freeswitch import FSInboundConnection, OriginateError
 from models import BigTableInput, Session
 from sqlalchemy import select
 import time
@@ -77,22 +77,30 @@ class Dialer:
             self.fs.keep_connected()
             row = Session.execute(
                 select(BigTableInput).where(
-                    BigTableInput.job_uuid == None  # noqa: E711, W503
+                    BigTableInput.job_uuid == None,  # noqa: E711, W503
+                    # rows that failed to originate keep the error on job_status
+                    BigTableInput.job_status == None,  # noqa: E711, W503
                 )
             ).scalar()
             if row:
                 self.logger.debug(f"Dialing to {row.customer_name} @{row.phone}")
-                originated = self.fs.originate(
-                    row.phone,
-                    dp_dst,
-                    row.id,
-                    callerid_num=self.callerid_num,
-                    callerid_name=self.callerid_name,
-                    orig_domain=f"{domain}",
-                    dest_context=context,
-                    endpoint="loopback",
-                    profile="external",
-                )
+                try:
+                    originated = self.fs.originate(
+                        row.phone,
+                        dp_dst,
+                        row.id,
+                        callerid_num=self.callerid_num,
+                        callerid_name=self.callerid_name,
+                        orig_domain=f"{domain}",
+                        dest_context=context,
+                        endpoint="loopback",
+                        profile="external",
+                    )
+                except OriginateError as error:
+                    self.logger.error(f"Originate failed for row {row.id}: {error}")
+                    row.job_status = f"ORIGINATE_ERROR {error}"[:40]
+                    Session.commit()
+                    continue
 
                 row.job_uuid = originated["job_uuid"].replace("\n", "")
                 row.call_uuid = originated["call_uuid"]

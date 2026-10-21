@@ -4,6 +4,7 @@ import pytest
 
 import dialer as dialer_module
 from dialer import Dialer, DialerStopError
+from freeswitch import OriginateError
 from models import BigTableInput
 
 
@@ -139,3 +140,37 @@ def test_stop_waits_running_jobs(dialer):
 
     assert dialer.running is False
     sleep.assert_called_once_with(0.5)
+
+
+def test_originate_error_is_recorded_and_not_retried(db, dialer):
+    failed = BigTableInput(customer_name="Falha", phone="11900000009")
+    ok = BigTableInput(customer_name="Sucesso", phone="11900000008")
+    db.add_all([failed, ok])
+    db.commit()
+    dialer.fs.originate.side_effect = [
+        OriginateError("unexpected reply: '+OK'"),
+        {"job_uuid": "job-2", "call_uuid": "call-2"},
+    ]
+
+    dialer.start("pbx.example.com", "ctx", "99")
+
+    db.refresh(failed)
+    db.refresh(ok)
+    assert failed.job_uuid is None
+    assert failed.job_status == "ORIGINATE_ERROR unexpected reply: '+OK'"[:40]
+    assert ok.job_uuid == "job-2"
+    assert dialer.fs.originate.call_count == 2
+    assert dialer._running_calls == ["call-2"]
+
+
+def test_failed_rows_are_not_dialed_again(db, dialer):
+    db.add(BigTableInput(customer_name="Falha", phone="1", job_status="ORIGINATE_ERROR x"))
+    db.commit()
+
+    def stop_dialer(seconds):
+        dialer.running = False
+
+    with patch.object(dialer_module.time, "sleep", side_effect=stop_dialer):
+        dialer.start("pbx.example.com", "ctx", "99")
+
+    dialer.fs.originate.assert_not_called()

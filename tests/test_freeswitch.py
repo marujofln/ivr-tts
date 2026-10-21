@@ -98,3 +98,25 @@ def test_keep_connected_checks_uptime_after_interval(fs):
 
     fs.connector.send.assert_called_once_with("api uptime")
     assert datetime.now() - fs._last_check < timedelta(seconds=5)
+
+
+def test_originate_strips_trailing_newline(fs):
+    fs.connector.send.return_value = reply("+OK Job-UUID: job-123\n")
+    assert fs.originate("1000", "99", 1)["job_uuid"] == "job-123"
+
+
+@pytest.mark.parametrize(
+    "data,message",
+    [
+        ("-ERR", "unknown error"),
+        ("-ERR NO_ROUTE_DESTINATION\n", "NO_ROUTE_DESTINATION"),
+        ("+OK", "unexpected reply: '\\+OK'"),
+        ("", "unexpected reply: ''"),
+        (None, "unexpected reply: ''"),
+        ("-USAGE: originate <call url>", "unexpected reply"),
+    ],
+)
+def test_originate_unexpected_replies_raise(fs, data, message):
+    fs.connector.send.return_value = reply(data)
+    with pytest.raises(OriginateError, match=message):
+        fs.originate("1000", "99", 1)

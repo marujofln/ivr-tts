@@ -54,7 +54,7 @@ class FSInboundConnection(object):
         dest_context: str = "default",
         endpoint: str = "sofia",  # ex: 'sofia', 'user'
         profile: str = "internal",
-    ) -> bool:
+    ) -> dict:
         """Originate a background call on Freeswitch
 
         Args:
@@ -69,10 +69,10 @@ class FSInboundConnection(object):
 
 
         Raises:
-            OriginateError: when some error occurs.
+            OriginateError: on -ERR, on any unexpected reply or when the ESL send fails.
 
         Returns:
-            str: When freeswitch originate returns +OK, returns jobb uuid.
+            dict: {"job_uuid": ..., "call_uuid": ...} when freeswitch originate returns +OK.
         """
 
         orig_uuid = str(uuid.uuid4())
@@ -102,18 +102,23 @@ class FSInboundConnection(object):
 
         try:
             r = self.connector.send(originate_cmd)
-            r_data = r.data.split(" ")
-            if r_data[0] == "+OK":
-                self.logger.debug(f"Originate returning: {r_data}")
-                return {"job_uuid": r_data[2], "call_uuid": orig_uuid}
-
-            elif r_data[0] == "-ERR":
-                self.logger.error(f"Originate: {r_data[1]}")
-                raise OriginateError(f"{r_data[1]} {r_data[2]}")
-
         except KeyError as e:
             self.logger.error(f"Originate: {e}")
             raise OriginateError(f"{e}")
+
+        reply = (r.data or "").strip()
+        r_data = reply.split()
+        # expected reply: "+OK Job-UUID: <job uuid>"
+        if len(r_data) == 3 and r_data[0] == "+OK":
+            self.logger.debug(f"Originate returning: {r_data}")
+            return {"job_uuid": r_data[2], "call_uuid": orig_uuid}
+
+        if r_data[:1] == ["-ERR"]:
+            error = " ".join(r_data[1:]) or "unknown error"
+        else:
+            error = f"unexpected reply: {reply!r}"
+        self.logger.error(f"Originate: {error}")
+        raise OriginateError(error)
 
     def keep_connected(
         self, time_btw_tries: int = 3, connection_tries: int = 5, check_interval: int = 10

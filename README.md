@@ -81,12 +81,42 @@ using `unimrcp:uni2` and voice `pt-BR-Wavenet-B` (Google Cloud TTS through UniMR
 
 ## Development
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+### Package management with uv
+
+This project uses [uv](https://docs.astral.sh/uv/) as its Python package and environment manager.
+Dependencies are declared in `pyproject.toml` and pinned in `uv.lock` (commit both). There is no
+pip/poetry workflow.
+
+Install uv (see the [installation docs](https://docs.astral.sh/uv/getting-started/installation/) for other methods):
 
 ```bash
-uv sync                 # install dependencies (including dev)
-uv run pytest           # run the test suite (no FreeSWITCH or PostgreSQL needed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+uv reads `.python-version` and downloads Python 3.12 automatically if it is not installed.
+
+```bash
+uv sync                      # create .venv and install all dependencies (including dev)
+uv run pytest                # run the test suite (no FreeSWITCH or PostgreSQL needed)
+uv run <command>             # run any command inside the project environment
+
+uv add <package>             # add a runtime dependency
+uv add --dev <package>       # add a development dependency
+uv remove <package>          # remove a dependency
+uv lock --upgrade            # upgrade all locked versions
+```
+
+`requirements.txt` is generated from the lock file, for tools that do not support uv. Do not edit it by hand;
+regenerate it after any dependency change:
+
+```bash
+uv export --no-dev --no-emit-project --output-file requirements.txt
+```
+
+The Docker image also installs dependencies with `uv sync --frozen --no-dev`, so the build fails if
+`uv.lock` is out of date with `pyproject.toml`.
+
+### Running locally
 
 Running the processes locally (from the repository root, with `etc/.env` configured):
 

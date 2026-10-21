@@ -16,8 +16,11 @@ uv run python ivr_tts/tts_voice_message.py   # IVR socket server on :5000
 uv run python ivr_tts/models.py           # DROP and recreate schema
 ```
 
-After changing dependencies, regenerate `requirements.txt` with
+uv is the only package manager: never use `pip install`, poetry or edit `requirements.txt` by hand.
+Change dependencies with `uv add <pkg>` / `uv add --dev <pkg>` / `uv remove <pkg>` (updates `pyproject.toml`
+and `uv.lock`; commit both), then regenerate `requirements.txt` with
 `uv export --no-dev --no-emit-project --output-file requirements.txt`.
+The Docker build uses `uv sync --frozen`, so a stale `uv.lock` breaks it.
 
 ## Code layout and conventions
 

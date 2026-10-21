@@ -5,12 +5,11 @@ EXPOSE 8000
 ENV PYTHONFAULTHANDLER=1 \
   PYTHONUNBUFFERED=1 \
   PYTHONHASHSEED=random \
-  PIP_NO_CACHE_DIR=off \
-  PIP_DISABLE_PIP_VERSION_CHECK=on \
   UV_PROJECT_ENVIRONMENT=/usr/local \
   UV_COMPILE_BYTECODE=1
 
-RUN pip install uv
+# uv is the package manager: copy the static binary from the official image
+COPY --from=ghcr.io/astral-sh/uv:0.10.12 /uv /uvx /bin/
 
 WORKDIR /opt/ivr-tts
 

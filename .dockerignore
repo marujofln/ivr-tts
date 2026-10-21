@@ -1,0 +1,11 @@
+.git
+.venv
+.vscode
+.devcontainer
+etc/.env
+csv
+*.csv
+*.xlsx
+key.json
+**/__pycache__
+.pytest_cache

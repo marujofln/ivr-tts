@@ -72,3 +72,38 @@ def test_upload_requires_token():
         "/v1/upload_csv", files={"file": ("list.csv", CSV.encode(), "text/csv")}
     )
     assert r.status_code == 401
+
+
+def test_upload_database_error(monkeypatch):
+    # no schema on this database: to_sql into a missing column set must fail
+    engine = create_engine(
+        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+    )
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE big_table_input (id INTEGER PRIMARY KEY)"))
+    monkeypatch.setattr(app_module, "create_engine", lambda url: engine)
+    app.dependency_overrides[app_module.csv_writer] = lambda: {"id": "user"}
+    try:
+        r = TestClient(app).post(
+            "/v1/upload_csv", files={"file": ("list.csv", CSV.encode(), "text/csv")}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 452
+    assert "Error while uploading CSV to database" in r.json()["detail"]
+
+
+def test_me_returns_token_info():
+    app.dependency_overrides[app_module.authenticated] = lambda: {"id": "user-1", "scope": ["openid"]}
+    try:
+        r = TestClient(app).get("/me")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    assert r.json() == {"id": "user-1", "scope": ["openid"]}
+
+
+def test_me_requires_token():
+    assert TestClient(app).get("/me").status_code == 401

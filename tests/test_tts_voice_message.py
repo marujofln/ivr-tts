@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import greenswitch
 import pytest
 
 from models import BigTableInput, BigTableOutput
@@ -85,3 +86,15 @@ def test_run_swallows_missing_data(session):
     session.send.return_value = MagicMock(data="_undef_")
     TTSVoiceMessage(session).run()
     session.stop.assert_not_called()
+
+
+def test_run_handles_session_gone(session):
+    session.send.side_effect = greenswitch.esl.OutboundSessionHasGoneAway
+    TTSVoiceMessage(session).run()
+    session.stop.assert_not_called()
+
+
+def test_run_stops_session_on_unexpected_error(session):
+    session.linger.side_effect = RuntimeError("boom")
+    TTSVoiceMessage(session).run()
+    session.stop.assert_called_once()

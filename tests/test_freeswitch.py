@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -81,3 +82,19 @@ def test_keep_connected_noop_when_connected(fs):
     fs.keep_connected(check_interval=60)
     fs.connector.connect.assert_not_called()
     fs.connector.send.assert_not_called()
+
+
+def test_originate_key_error(fs):
+    fs.connector.send.side_effect = KeyError("Reply-Text")
+    with pytest.raises(OriginateError, match="Reply-Text"):
+        fs.originate("1000", "99", 1)
+
+
+def test_keep_connected_checks_uptime_after_interval(fs):
+    fs.connector.connected = True
+    fs._last_check = datetime.now() - timedelta(seconds=30)
+
+    fs.keep_connected(check_interval=10)
+
+    fs.connector.send.assert_called_once_with("api uptime")
+    assert datetime.now() - fs._last_check < timedelta(seconds=5)

@@ -1,7 +1,8 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+import dialer as dialer_module
 from dialer import Dialer, DialerStopError
 from models import BigTableInput
 
@@ -98,3 +99,43 @@ def test_on_channel_hangup_stores_cause(db, row, dialer):
 def test_stop_when_not_running(dialer):
     with pytest.raises(DialerStopError):
         dialer.stop()
+
+
+def test_start_waits_when_nothing_to_dial(db, dialer):
+    def stop_dialer(seconds):
+        dialer.running = False
+
+    with patch.object(dialer_module.time, "sleep", side_effect=stop_dialer) as sleep:
+        dialer.start("pbx.example.com", "ctx", "99")
+
+    sleep.assert_called_once_with(dialer_module.config.dialer_job_wait_time)
+    dialer.fs.originate.assert_not_called()
+
+
+def test_start_respects_max_concurrent_calls(db, dialer):
+    for i in range(3):
+        db.add(BigTableInput(customer_name=f"Contato {i}", phone=f"1190000000{i}"))
+    db.commit()
+    dialer.max_concurrent_calls = 2
+    dialer.fs.originate.side_effect = [
+        {"job_uuid": f"job-{i}", "call_uuid": f"call-{i}"} for i in range(3)
+    ]
+
+    dialer.start("pbx.example.com", "ctx", "99")
+
+    assert dialer.fs.originate.call_count == 2
+    assert db.query(BigTableInput).filter(BigTableInput.job_uuid.is_(None)).count() == 1
+
+
+def test_stop_waits_running_jobs(dialer):
+    dialer.running = True
+    dialer._running_jobs = {"job-1": {"call": "call-1", "row": 1}}
+
+    def finish_job(seconds):
+        dialer._running_jobs.clear()
+
+    with patch.object(dialer_module.gevent, "sleep", side_effect=finish_job) as sleep:
+        dialer.stop(timeout=0.5)
+
+    assert dialer.running is False
+    sleep.assert_called_once_with(0.5)

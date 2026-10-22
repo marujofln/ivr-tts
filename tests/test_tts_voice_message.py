@@ -4,7 +4,7 @@ import greenswitch
 import pytest
 
 from models import BigTableInput, BigTableOutput
-from tts_voice_message import IVRNoData, TTSVoiceMessage
+from tts_voice_message import IVRForbiddenPeer, IVRNoData, TTSVoiceMessage
 
 
 @pytest.fixture
@@ -12,6 +12,7 @@ def session():
     s = MagicMock()
     s.call_uuid = "call-1"
     s.event_handlers = {"CHANNEL_HANGUP": MagicMock()}
+    s.sock.getpeername.return_value = ("127.0.0.1", 40000)
     return s
 
 
@@ -98,3 +99,56 @@ def test_run_stops_session_on_unexpected_error(session):
     session.linger.side_effect = RuntimeError("boom")
     TTSVoiceMessage(session).run()
     session.stop.assert_called_once()
+
+
+def test_speak_strips_line_breaks(session):
+    TTSVoiceMessage(session).speak("a\n\napi system id\r\n", engine="e", voice="v")
+    session.call_command.assert_called_once_with("speak", "e|v|a api system id ")
+
+
+def test_safe_run_escapes_contact_fields(db, session):
+    r = BigTableInput(
+        customer_name='<audio src="http://attacker.example.com/x"/>',
+        condo="A & B\n\napi system id", unity="1", phone="11900000001", call_uuid="call-1",
+    )
+    db.add(r)
+    db.commit()
+    session.send.return_value = MagicMock(data=str(r.id))
+
+    TTSVoiceMessage(session).safe_run()
+
+    text = spoken(session)
+    assert "<audio" not in text
+    assert "&lt;audio" in text
+    assert "A &amp; B api system id" in text
+    assert all("\n" not in c.args[1] for c in session.call_command.call_args_list if c.args[0] == "speak")
+
+
+def test_safe_run_rejects_unknown_peer(db, row, session):
+    session.sock.getpeername.return_value = ("203.0.113.5", 40000)
+    with pytest.raises(IVRForbiddenPeer):
+        TTSVoiceMessage(session).safe_run()
+    session.send.assert_not_called()
+
+
+def test_run_stops_session_from_unknown_peer(session):
+    session.sock.getpeername.return_value = ("203.0.113.5", 40000)
+    TTSVoiceMessage(session).run()
+    session.stop.assert_called_once()
+    session.answer.assert_not_called()
+
+
+def test_allowed_peers_list_and_wildcard(db, row, session, monkeypatch):
+    from settings import config
+
+    session.sock.getpeername.return_value = ("172.17.0.1", 40000)
+    session.send.return_value = MagicMock(data=str(row.id))
+
+    monkeypatch.setattr(config, "ivr_allowed_peers", "10.0.0.1, 172.17.0.1")
+    TTSVoiceMessage(session).safe_run()
+
+    monkeypatch.setattr(config, "ivr_allowed_peers", "*")
+    session.event_handlers = {"CHANNEL_HANGUP": MagicMock()}
+    session.sock.getpeername.return_value = ("203.0.113.5", 40000)
+    TTSVoiceMessage(session).safe_run()
+    assert session.answer.call_count == 2

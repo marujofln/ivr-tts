@@ -5,6 +5,7 @@ from io import BytesIO
 import pandas as pd
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from csv_import import TEXT_COLUMNS, clean_text
 from fief_client import FiefAccessTokenInfo
 from phonenumbers import parse
 from phonenumbers.phonenumberutil import NumberParseException
@@ -77,15 +78,25 @@ async def upload_csv(
             detail=f"Invalid file type. Expected text/csv, got {file.content_type}",
         )
 
-    contents = file.file.read()
+    # read one byte past the limit to tell a full-size file from a bigger one
+    contents = file.file.read(config.restapi_max_upload_size + 1)
+    if len(contents) > config.restapi_max_upload_size:
+        file.file.close()
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {config.restapi_max_upload_size} bytes",
+        )
     data = BytesIO(contents)
 
     try:
 
         for df in pd.read_csv(
-            data, names=columns, chunksize=1000, converters={"phone": phone_parser}
+            data,
+            names=columns,
+            chunksize=1000,
+            converters={"phone": phone_parser, **dict.fromkeys(TEXT_COLUMNS, clean_text)},
         ):
-            print(df)
+            logging.debug(f"Importing {len(df)} rows from {file.filename}")
             try:
                 df.to_sql(
                     "big_table_input",
@@ -93,13 +104,14 @@ async def upload_csv(
                     index=False,
                     if_exists="append",  # if the table already exists, append this data
                 )
-            except Exception as e:
-                logging.error(f"Error while uploading CSV to database: {e}")
+            except Exception:
+                # details stay in the log: they may expose schema or connection data
+                logging.exception("Error while uploading CSV to database")
                 data.close()
                 file.file.close()
                 raise HTTPException(
                     status_code=452,
-                    detail=f"Error while uploading CSV to database: {e}",
+                    detail="Error while uploading CSV to database",
                 )
 
     except NumberParseException as e:

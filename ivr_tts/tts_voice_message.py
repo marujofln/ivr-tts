@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
+import re
+from xml.sax.saxutils import escape
 
 # import gevent
 import greenswitch
@@ -40,6 +42,10 @@ class IVRMaxTries(Exception):
 
 
 class IVRNoData(Exception):
+    pass
+
+
+class IVRForbiddenPeer(Exception):
     pass
 
 
@@ -104,6 +110,8 @@ class TTSVoiceMessage(object):
         """
         # self.session.call_command(f"set", "tts_engine={engine}")
         # self.session.call_command(f"set", "tts_voice={voice}")
+        # a line break would end the ESL sendmsg and let the rest run as a new command
+        prompt = re.sub(r"[\x00-\x1f\x7f]+", " ", prompt)
         args = f"{engine}|{voice}|{prompt}"
         self.logger.debug(
             f"Speaking {prompt} with voice {voice} using engine {engine}."
@@ -242,14 +250,28 @@ class TTSVoiceMessage(object):
         except IVRNoData as error:
             self.logger.error(error)
 
+        except IVRForbiddenPeer as error:
+            self.logger.warning(error)
+            self.session.stop()
+
         except Exception as error:
             self.logger.error(f"Exception {error }raised when handling call")
             self.session.stop()
+
+    def check_peer(self):
+        """Only FreeSWITCH may drive this server: anyone else could read contacts by data_id."""
+        allowed = [p.strip() for p in config.ivr_allowed_peers.split(",") if p.strip()]
+        if "*" in allowed:
+            return
+        peer = self.session.sock.getpeername()[0]
+        if peer not in allowed:
+            raise IVRForbiddenPeer(f"Rejecting outbound session from {peer}")
 
     def safe_run(self):
         """
         Main function that is called when a call comes in.
         """
+        self.check_peer()
         self.responses = {
             self.session.call_uuid: {
                 "is_customer": True,
@@ -299,7 +321,10 @@ class TTSVoiceMessage(object):
 
         self.speak(ssml_intro.speak())
         ssml = Speech()
-        ssml.add_text(f"{origin_data.condo}, unidade: {origin_data.unity}, para {origin_data.customer_name}")
+        condo, unity, name = (
+            escape(str(v)) for v in (origin_data.condo, origin_data.unity, origin_data.customer_name)
+        )
+        ssml.add_text(f"{condo}, unidade: {unity}, para {name}")
         self.speak(ssml.speak())
 
         ssml = Speech()
@@ -314,8 +339,8 @@ class TTSVoiceMessage(object):
 
 if __name__ == "__main__":
     server = greenswitch.OutboundESLServer(
-        bind_address="0.0.0.0",
-        bind_port=5000,
+        bind_address=config.ivr_bind_address,
+        bind_port=config.ivr_bind_port,
         application=TTSVoiceMessage,
         max_connections=5,
     )

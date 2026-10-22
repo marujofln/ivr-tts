@@ -26,7 +26,7 @@ The application is made of three processes, all started by `run.sh`:
 | --- | --- | --- |
 | Web server | `ivr_tts/app.py` | FastAPI app. `POST /v1/upload_csv` validates the CSV and phone numbers and inserts rows into `big_table_input`. Protected by OAuth2 through [Fief](https://www.fief.dev/). |
 | Dialer | `ivr_tts/dialer.py` | Connects to FreeSWITCH through ESL (inbound), picks rows with no `job_uuid` and originates calls (up to `dialer_max_concurrent_calls` at once). Stores job status and hangup cause on each row. |
-| IVR server | `ivr_tts/tts_voice_message.py` | ESL outbound socket server on port 5000. FreeSWITCH hands each answered call to it; it loads the contact row (via the `data_id` channel variable), speaks the message and hangs up. The result is written to `big_table_output`. |
+| IVR server | `ivr_tts/tts_voice_message.py` | ESL outbound socket server on port 5000; only accepts connections from `ivr_allowed_peers`. FreeSWITCH hands each answered call to it; it loads the contact row (via the `data_id` channel variable), speaks the message and hangs up. The result is written to `big_table_output`. |
 
 Other modules:
 
@@ -67,6 +67,9 @@ cp etc/.env.example etc/.env
 | `dialer_max_concurrent_calls` | `10` | simultaneous calls |
 | `dialer_job_wait_time` | `10` | seconds to wait when there is nothing to dial |
 | `dialer_callerid_number` / `_name` | `0000` / `IVR TTS Dialer` | caller ID on originated calls |
+| `restapi_max_upload_size` | `10485760` | maximum CSV upload size in bytes; larger files get HTTP 413 |
+| `ivr_bind_address` / `ivr_bind_port` | `0.0.0.0` / `5000` | address the IVR outbound socket server listens on |
+| `ivr_allowed_peers` | `127.0.0.1` | comma-separated IPs allowed to connect to the IVR server (the FreeSWITCH host as seen by it); `*` allows any. Other connections are dropped, since they could read contact data |
 | `ivr_company_name` | `Example Company` | company name spoken on the message |
 | `ivr_contact_phone` | `zero oitocentos, …` | contact phone, written **as it must be spoken** |
 | `postgres_host` / `_port` / `_user` / `_password` / `_database` | `localhost` / `5432` / `ivr_tts` / – / `ivr_tts` | database |
@@ -175,7 +178,10 @@ fs_cli -x 'reload mod_event_socket'
 ### 3. Create the IVR dialplan extension
 
 The dialer originates `loopback/<phone>/<dialer_domain>` and bridges it to `dialer_dialplan_dst` in
-`dialer_dialplan_context`. That extension must hand the call to the IVR server (container IP, port 5000):
+`dialer_dialplan_context`. That extension must hand the call to the IVR server (container IP, port 5000). Add the address FreeSWITCH
+connects from to `ivr_allowed_peers` (with the default Docker bridge, a FreeSWITCH on the host shows up as
+`172.17.0.1`), otherwise the IVR server drops the call. A dropped call logs
+`Rejecting outbound session from <ip>`, which shows the address to add:
 
 ```xml
 <extension name="ivr_tts" continue="false">

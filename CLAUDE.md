@@ -40,6 +40,11 @@ The Docker build uses `uv sync --frozen`, so a stale `uv.lock` breaks it.
   the dialer then stores `ORIGINATE_ERROR <reason>` on `job_status` and skips the row) →
   `on_job_finished` (BACKGROUND_JOB) stores `job_status` → `on_channel_hangup` stores hangup cause/SIP status.
   The IVR finds the contact through the `data_id` channel variable set on originate.
+- The IVR server (`tts_voice_message.py`) drops sessions whose peer IP is not in `ivr_allowed_peers`
+  (`check_peer()`, first step of `safe_run()`): anyone able to open an outbound session could read contacts by
+  `data_id`. Test session mocks must set `sock.getpeername.return_value` to an allowed address.
+- CSV text columns go through `clean_text()` (`csv_import.py`) and `speak()` strips control characters: a line
+  break would end the ESL `sendmsg` and run the rest as a FreeSWITCH command. Keep both when adding fields.
 - The spoken message lives in `TTSVoiceMessage.safe_run()`; company name and contact phone come from
   `ivr_company_name` / `ivr_contact_phone` settings. Never hardcode real company names or phone numbers.
 - `ivr_tts/stuff/` and `ivr_tts/listener.py` are debug tools / legacy flows, not run in production and not tested.

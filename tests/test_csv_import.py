@@ -4,7 +4,7 @@ import pytest
 from phonenumbers.phonenumberutil import NumberParseException
 from sqlalchemy import create_engine, text
 
-from csv_import import import_csv, phone_parser
+from csv_import import clean_text, import_csv, phone_parser
 from models import Base
 
 EXAMPLE_CSV = Path(__file__).resolve().parent.parent / "csv" / "example.csv"
@@ -46,3 +46,19 @@ def test_import_appends(engine):
 
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM big_table_input")).scalar() == 6
+
+
+def test_clean_text():
+    assert clean_text("Condo\r\n\r\napi system id") == "Condo api system id"
+    assert clean_text("a\tb\x00c") == "a b c"
+    assert clean_text("\n") is None
+
+
+def test_import_strips_line_breaks(engine, tmp_path):
+    path = tmp_path / "list.csv"
+    path.write_text('"Fulano","Condo\n\napi system id","101","11900000001"\n')
+
+    import_csv(str(path), engine)
+
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT condo FROM big_table_input")).scalar() == "Condo api system id"

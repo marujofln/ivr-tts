@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     restapi_host: str = '0.0.0.0'
     restapi_port: int = 8000
+    restapi_max_upload_size: int = 10 * 1024 * 1024  # bytes
 
     fief_base_url: str = 'https://auth.example.com'
     fief_authorize_path: str = '/authorize'
@@ -35,6 +36,10 @@ class Settings(BaseSettings):
     dialer_callerid_number: str = '0000'
     dialer_callerid_name: str = 'IVR TTS Dialer'
 
+    ivr_bind_address: str = '0.0.0.0'
+    ivr_bind_port: int = 5000
+    # Comma-separated IPs allowed to open an outbound ESL session; '*' allows any
+    ivr_allowed_peers: str = '127.0.0.1'
     ivr_company_name: str = 'Example Company'
     # Contact phone as it must be spoken by the TTS engine
     ivr_contact_phone: str = 'zero oitocentos, zero zero zero, zero zero zero zero'

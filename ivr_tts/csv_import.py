@@ -1,3 +1,4 @@
+import re
 import sys
 
 import pandas as pd
@@ -15,6 +16,16 @@ columns = [
 ]
 
 
+# Control characters (CR/LF included) would end the ESL command that speaks the field
+CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+TEXT_COLUMNS = ("customer_name", "condo", "unity")
+
+
+def clean_text(value: str):
+    """Replace control characters with a space. Empty fields stay NULL."""
+    return CONTROL_CHARS.sub(" ", value).strip() or None
+
+
 def phone_parser(number: str):
     return parse(number, "BR").national_number
 
@@ -22,7 +33,10 @@ def phone_parser(number: str):
 def import_csv(path: str, engine):
     """Load a headerless CSV (customer_name, condo, unity, phone) into big_table_input."""
     for df in pd.read_csv(
-        path, names=columns, chunksize=1000, converters={"phone": phone_parser}
+        path,
+        names=columns,
+        chunksize=1000,
+        converters={"phone": phone_parser, **dict.fromkeys(TEXT_COLUMNS, clean_text)},
     ):
         df.to_sql(
             "big_table_input",

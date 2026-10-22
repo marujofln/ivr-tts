@@ -52,6 +52,37 @@ def test_upload_csv(client):
     ]
 
 
+def test_upload_strips_line_breaks(client):
+    c, engine = client
+    csv = b'"Fulano\r\n\r\napi system id","Condo","101","11900000001"\n'
+    r = c.post("/v1/upload_csv", files={"file": ("list.csv", csv, "text/csv")})
+
+    assert r.status_code == 200
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT customer_name FROM big_table_input")).scalar() == "Fulano api system id"
+
+
+def test_upload_rejects_too_large(client, monkeypatch):
+    from settings import config
+
+    c, engine = client
+    monkeypatch.setattr(config, "restapi_max_upload_size", len(CSV.encode()) - 1)
+    r = c.post("/v1/upload_csv", files={"file": ("list.csv", CSV.encode(), "text/csv")})
+
+    assert r.status_code == 413
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM big_table_input")).scalar() == 0
+
+
+def test_upload_accepts_file_at_limit(client, monkeypatch):
+    from settings import config
+
+    c, _ = client
+    monkeypatch.setattr(config, "restapi_max_upload_size", len(CSV.encode()))
+    r = c.post("/v1/upload_csv", files={"file": ("list.csv", CSV.encode(), "text/csv")})
+    assert r.status_code == 200
+
+
 def test_upload_rejects_non_csv(client):
     c, _ = client
     r = c.post("/v1/upload_csv", files={"file": ("list.txt", b"x", "text/plain")})
@@ -91,7 +122,8 @@ def test_upload_database_error(monkeypatch):
         app.dependency_overrides.clear()
 
     assert r.status_code == 452
-    assert "Error while uploading CSV to database" in r.json()["detail"]
+    # the database error stays in the log, not in the response
+    assert r.json()["detail"] == "Error while uploading CSV to database"
 
 
 def test_me_returns_token_info():
